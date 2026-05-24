@@ -1,7 +1,7 @@
 {
   "name": "redou-agent-desktop",
   "productName": "Redou Agent",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "private": true,
   "description": "Redou Agent desktop shell",
   "homepage": "https://github.com/herb711/RedouAgent",

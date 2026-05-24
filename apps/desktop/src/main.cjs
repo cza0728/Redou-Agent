@@ -681,6 +681,21 @@ ipcMain.handle("redou:analysis:benchmarks", () =>
 ipcMain.handle("redou:analysis:start", (event, body) =>
   getLocalService().startAnalysisBenchmarks(event.sender, body),
 );
+ipcMain.handle("redou:analysis:stop", (_event, key) =>
+  getLocalService().stopAnalysisBenchmark(key),
+);
+ipcMain.handle("redou:analysis:logs-list", () =>
+  getLocalService().getAnalysisLogsList(),
+);
+ipcMain.handle("redou:analysis:log-detail", (_event, key) =>
+  getLocalService().getAnalysisLogDetail(key),
+);
+ipcMain.handle("redou:analysis:log-chat", (_event, body) =>
+  getLocalService().chatWithAnalysisLog(body),
+);
+ipcMain.handle("redou:analysis:log-chat-clear", (_event, sessionKey) =>
+  getLocalService().clearAnalysisLogChat(sessionKey),
+);
 
 function readJsonFile(filePath) {
   try {

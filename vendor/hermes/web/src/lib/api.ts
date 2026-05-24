@@ -52,6 +52,11 @@ declare global {
       startAnalysisBenchmarks?: (
         body: AnalysisBenchmarkStartRequest,
       ) => Promise<AnalysisBenchmarkStartResponse>;
+      stopAnalysisBenchmark?: (key: string) => Promise<AnalysisStopResponse>;
+      getAnalysisLogsList?: () => Promise<AnalysisLogEntry[]>;
+      getAnalysisLogDetail?: (key: string) => Promise<AnalysisLogDetail | null>;
+      chatWithAnalysisLog?: (body: AnalysisLogChatRequest) => Promise<AnalysisLogChatResponse>;
+      clearAnalysisLogChat?: (sessionKey: string) => Promise<{ ok: boolean }>;
       getAnalytics?: (days: number) => Promise<AnalyticsResponse>;
       getChatProjects?: () => Promise<ChatProjectsResponse>;
       getLogs?: (
@@ -304,6 +309,14 @@ const redouApiCore = {
     getAnalysisBenchmarks: () => requireRedouMethod("getAnalysisBenchmarks")(),
     startAnalysisBenchmarks: (body: AnalysisBenchmarkStartRequest) =>
       requireRedouMethod("startAnalysisBenchmarks")(body),
+    stopAnalysisBenchmark: (key: string) =>
+      requireRedouMethod("stopAnalysisBenchmark")(key),
+    getAnalysisLogsList: () => requireRedouMethod("getAnalysisLogsList")(),
+    getAnalysisLogDetail: (key: string) => requireRedouMethod("getAnalysisLogDetail")(key),
+    chatWithAnalysisLog: (body: AnalysisLogChatRequest) =>
+      requireRedouMethod("chatWithAnalysisLog")(body),
+    clearAnalysisLogChat: (sessionKey: string) =>
+      requireRedouMethod("clearAnalysisLogChat")(sessionKey),
     onAnalysisEvent: (callback: (payload: AnalysisBenchmarkEvent) => void) =>
       requireRedouMethod("onAnalysisEvent")(callback),
   },
@@ -470,6 +483,11 @@ export const redouApi = {
   getModelsAnalytics: redouApiCore.analytics.getModelsAnalytics,
   getAnalysisBenchmarks: redouApiCore.analytics.getAnalysisBenchmarks,
   startAnalysisBenchmarks: redouApiCore.analytics.startAnalysisBenchmarks,
+  stopAnalysisBenchmark: redouApiCore.analytics.stopAnalysisBenchmark,
+  getAnalysisLogsList: redouApiCore.analytics.getAnalysisLogsList,
+  getAnalysisLogDetail: redouApiCore.analytics.getAnalysisLogDetail,
+  chatWithAnalysisLog: redouApiCore.analytics.chatWithAnalysisLog,
+  clearAnalysisLogChat: redouApiCore.analytics.clearAnalysisLogChat,
   onAnalysisEvent: redouApiCore.analytics.onAnalysisEvent,
   getConfig: redouApiCore.settings.getConfig,
   getDefaults: redouApiCore.settings.getDefaults,
@@ -1213,6 +1231,39 @@ export interface AnalysisBenchmarkEvent {
   taskId?: string;
   error?: string;
   updatedAt: string;
+}
+
+export interface AnalysisStopResponse {
+  ok: boolean;
+  message: string;
+}
+
+export interface AnalysisLogEntry {
+  key: string;
+  runId: string;
+  provider: string;
+  model: string;
+  status: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  label: string;
+}
+
+export interface AnalysisLogDetail {
+  result: AnalysisBenchmarkResult;
+  events: Array<Record<string, unknown>>;
+}
+
+export interface AnalysisLogChatRequest {
+  sessionKey: string;
+  logKey: string;
+  message: string;
+  locale?: string;
+}
+
+export interface AnalysisLogChatResponse {
+  reply: string;
+  model: string;
 }
 
 export interface CronJob {

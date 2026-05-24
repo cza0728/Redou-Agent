@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { chatWithAnalysisLog, clearConversation: clearLogChatConversation } = require("./analysisLogChat.cjs");
 const {
   assertChildPath,
   copyDirectoryRecursive,
@@ -565,6 +566,85 @@ class AnalysisStateMethods {
     };
   }
 
+  stopAnalysisBenchmark(key) {
+    const cleanKey = String(key || "").trim();
+    if (!cleanKey) return { ok: false, message: "No benchmark key provided." };
+
+    // Check queue first — remove before it starts
+    const queueIndex = this.analysisQueue.findIndex((item) => item.key === cleanKey);
+    if (queueIndex >= 0) {
+      const removed = this.analysisQueue.splice(queueIndex, 1)[0];
+      this.updateAnalysisResult(cleanKey, (result) => ({
+        ...result,
+        status: "interrupted",
+        completedAt: result.completedAt || isoNow(),
+        updatedAt: isoNow(),
+        summary: "Benchmark stopped by user.",
+      }));
+      if (removed?.webContents) {
+        this.emitAnalysisEvent(removed.webContents, { type: "changed", runId: removed.runId });
+      }
+      return { ok: true, message: "Removed from queue." };
+    }
+
+    // Check active runs
+    for (const [runId, item] of this.activeAnalysisRuns.entries()) {
+      if (item.key === cleanKey) {
+        item.stopRequested = true;
+        if (item.child) {
+          this.processManager.terminate(item.child, { force: true });
+        }
+        this.lifecycle.markAnalysisInterrupted(item, "Benchmark stopped by user.");
+        return { ok: true, message: "Benchmark interrupted." };
+      }
+    }
+
+    return { ok: false, message: "Benchmark not found or already finished." };
+  }
+
+  getAnalysisLogsList() {
+    const store = this.readAnalysisStore();
+    return (store.results || []).map((result) => ({
+      key: result.key,
+      runId: result.runId,
+      provider: result.provider,
+      model: result.model,
+      status: result.status,
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
+      label: `${result.model} (${result.provider}) — ${result.startedAt ? new Date(result.startedAt).toLocaleString() : "N/A"}`,
+    })).sort((a, b) => {
+      const ta = a.startedAt ? Date.parse(a.startedAt) : 0;
+      const tb = b.startedAt ? Date.parse(b.startedAt) : 0;
+      return tb - ta;
+    });
+  }
+
+  getAnalysisLogDetail(key) {
+    const store = this.readAnalysisStore();
+    const result = store.results.find((r) => r.key === key);
+    if (!result) return null;
+    // Also try to read events.jsonl for this run
+    const eventsPath = path.join(
+      this.analysisWorkspaceRoot(),
+      ".redou",
+      "tasks",
+      `benchmark-${safeSegment(key, "model")}-${safeSegment(result.runId, "run")}`,
+      "events.jsonl",
+    );
+    let events = [];
+    try {
+      if (fs.existsSync(eventsPath)) {
+        events = fs.readFileSync(eventsPath, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+          .filter(Boolean);
+      }
+    } catch { /* ignore */ }
+    return { result, events };
+  }
+
   emitAnalysisEvent(webContents, payload = {}) {
     if (!webContents || webContents.isDestroyed()) return;
     webContents.send("redou:analysis-event", {
@@ -596,6 +676,22 @@ class AnalysisStateMethods {
           : task,
       ),
     }));
+  }
+
+  async chatWithAnalysisLog(body) {
+    const logDetail = body.logKey ? this.getAnalysisLogDetail(body.logKey) : null;
+    return chatWithAnalysisLog({
+      sessionKey: body.sessionKey || body.logKey || "default",
+      userMessage: body.message,
+      logDetail,
+      locale: body.locale || "zh",
+      hermesHome: this.hermesHome,
+    });
+  }
+
+  clearAnalysisLogChat(sessionKey) {
+    clearLogChatConversation(sessionKey || "default");
+    return { ok: true };
   }
 
   startAnalysisQueue() {

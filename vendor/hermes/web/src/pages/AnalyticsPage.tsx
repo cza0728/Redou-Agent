@@ -8,6 +8,7 @@ import {
   Play,
   RefreshCw,
   Square,
+  StopCircle,
   TriangleAlert,
 } from "lucide-react";
 import { redouApi } from "@/lib/api";
@@ -17,6 +18,7 @@ import type {
   AnalysisBenchmarksResponse,
   ModelOptionProvider,
   ModelOptionsResponse,
+  ModelSetupCatalogResponse,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@nous-research/ui/ui/components/button";
@@ -139,6 +141,8 @@ const COPY = {
     error: "错误",
     current: "当前",
     agent: "Agent",
+    interrupt: "中断执行",
+    noConfiguredModels: "没有已配置 API Key 的模型，请先在配置中设置 API Key",
   },
   en: {
     titleBadge: "Model benchmark",
@@ -167,6 +171,8 @@ const COPY = {
     error: "Error",
     current: "Current",
     agent: "Agent",
+    interrupt: "Interrupt",
+    noConfiguredModels: "No models with configured API keys. Set up API keys in Config first.",
   },
 } as const;
 
@@ -286,12 +292,19 @@ function benchmarkEvaluationTimeMs(result: AnalysisBenchmarkResult): number {
   return Number.isFinite(timeMs) ? timeMs : 0;
 }
 
-function buildChoices(options: ModelOptionsResponse | null): BenchmarkModelChoice[] {
+function buildChoices(
+  options: ModelOptionsResponse | null,
+  configuredProviders?: Set<string>,
+): BenchmarkModelChoice[] {
   const choices = new Map<string, BenchmarkModelChoice>();
   const add = (provider: string, model: string, current = false) => {
     const cleanProvider = String(provider || "auto").trim();
     const cleanModel = String(model || "").trim();
     if (!cleanModel) return;
+    // Filter out providers without configured API keys
+    if (configuredProviders && configuredProviders.size > 0 && !configuredProviders.has(cleanProvider)) {
+      return;
+    }
     const key = modelKey(cleanProvider, cleanModel);
     const existing = choices.get(key);
     choices.set(key, {
@@ -603,10 +616,14 @@ function ModelResultCard({
   result,
   nowMs,
   comparisonMode = false,
+  onStop,
+  stopping,
 }: {
   result: AnalysisBenchmarkResult;
   nowMs: number;
   comparisonMode?: boolean;
+  onStop?: (key: string) => void;
+  stopping?: boolean;
 }) {
   const { locale } = useI18n();
   const copy = COPY[locale === "zh" ? "zh" : "en"];
@@ -633,9 +650,24 @@ function ModelResultCard({
               <span>{copy.agent}: {result.agent}</span>
             </div>
           </div>
-          <Badge tone="secondary" className="text-[10px]">
-            {statusLabel(result.status, localeKey)}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {isLiveStatus(result.status) && onStop && (
+              <Button
+                type="button"
+                size="sm"
+                outlined
+                onClick={() => onStop(result.key)}
+                disabled={stopping}
+                prefix={stopping ? <Spinner /> : <StopCircle className="h-3.5 w-3.5" />}
+                className="text-red-300 border-red-400/50 hover:bg-red-500/10"
+              >
+                {copy.interrupt}
+              </Button>
+            )}
+            <Badge tone="secondary" className="text-[10px]">
+              {statusLabel(result.status, localeKey)}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -693,24 +725,42 @@ export default function AnalyticsPage() {
   const { setAfterTitle, setEnd } = usePageHeader();
   const [benchmarks, setBenchmarks] = useState<AnalysisBenchmarksResponse | null>(null);
   const [modelOptions, setModelOptions] = useState<ModelOptionsResponse | null>(null);
+  const [setupCatalog, setSetupCatalog] = useState<ModelSetupCatalogResponse | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [stopping, setStopping] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const configuredProviders = useMemo(() => {
+    const set = new Set<string>();
+    for (const provider of setupCatalog?.providers ?? []) {
+      if (provider.api_key_set || provider.api_key_optional) {
+        set.add(provider.provider);
+      }
+    }
+    return set;
+  }, [setupCatalog]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [nextBenchmarks, nextModels] = await Promise.all([
+      const [nextBenchmarks, nextModels, nextCatalog] = await Promise.all([
         redouApi.getAnalysisBenchmarks(),
         redouApi.getModelOptions(),
+        redouApi.getModelSetupCatalog(),
       ]);
       setBenchmarks(nextBenchmarks);
       setModelOptions(nextModels);
-      const choices = buildChoices(nextModels);
+      setSetupCatalog(nextCatalog);
+      const configured = new Set<string>();
+      for (const p of nextCatalog?.providers ?? []) {
+        if (p.api_key_set || p.api_key_optional) configured.add(p.provider);
+      }
+      const choices = buildChoices(nextModels, configured);
       setSelected((current) => {
         if (current.size > 0) return current;
         const first = choices.find((choice) => choice.current) ?? choices[0];
@@ -769,7 +819,7 @@ export default function AnalyticsPage() {
     return map;
   }, [modelOptions]);
 
-  const choices = useMemo(() => buildChoices(modelOptions), [modelOptions]);
+  const choices = useMemo(() => buildChoices(modelOptions, configuredProviders), [modelOptions, configuredProviders]);
   const filteredChoices = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return choices;
@@ -817,6 +867,19 @@ export default function AnalyticsPage() {
       setStarting(false);
     }
   }, [load, selectedModels, starting]);
+
+  const stopBenchmark = useCallback(async (key: string) => {
+    if (stopping) return;
+    setStopping(key);
+    try {
+      await redouApi.stopAnalysisBenchmark(key);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStopping(null);
+    }
+  }, [load, stopping]);
 
   useLayoutEffect(() => {
     setAfterTitle(
@@ -962,6 +1025,8 @@ export default function AnalyticsPage() {
               result={result}
               nowMs={nowMs}
               comparisonMode={comparisonMode}
+              onStop={stopBenchmark}
+              stopping={stopping === result.key}
             />
           ))}
         </div>

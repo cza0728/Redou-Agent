@@ -56,6 +56,11 @@ contextBridge.exposeInMainWorld("redouDesktop", {
     ipcRenderer.invoke("redou:plugins:visibility", name, hidden),
   getAnalysisBenchmarks: () => ipcRenderer.invoke("redou:analysis:benchmarks"),
   startAnalysisBenchmarks: (body) => ipcRenderer.invoke("redou:analysis:start", body),
+  stopAnalysisBenchmark: (key) => ipcRenderer.invoke("redou:analysis:stop", key),
+  getAnalysisLogsList: () => ipcRenderer.invoke("redou:analysis:logs-list"),
+  getAnalysisLogDetail: (key) => ipcRenderer.invoke("redou:analysis:log-detail", key),
+  chatWithAnalysisLog: (body) => ipcRenderer.invoke("redou:analysis:log-chat", body),
+  clearAnalysisLogChat: (sessionKey) => ipcRenderer.invoke("redou:analysis:log-chat-clear", sessionKey),
   getChatProjects: () => ipcRenderer.invoke("redou:projects:list"),
   createChatProject: (body) => ipcRenderer.invoke("redou:projects:create", body),
   updateChatProject: (projectId, body) =>
