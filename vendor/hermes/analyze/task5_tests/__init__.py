@@ -1,0 +1,78 @@
+import sys
+import unittest
+
+from peewee import OperationalError
+
+# Core modules.
+from .db_tests import *
+from .fields import *
+from .manytomany import *
+from .models import *
+from .model_sql import *
+from .prefetch_tests import *
+from .results import *
+from .schema import *
+from .sql import *
+from .transactions import *
+
+# Extensions.
+try:
+    from .apsw_ext import *
+except ImportError:
+    print('Unable to import APSW extension tests, skipping.')
+try:
+    from .cockroachdb import *
+except:
+    print('Unable to import CockroachDB tests, skipping.')
+try:
+    from .cysqlite_ext import *
+except ImportError:
+    print('Unable to import cysqlite tests, skipping.')
+from .dataset import *
+from .db_url import *
+from .extra_fields import *
+from .hybrid import *
+from .kv import *
+from .migrations import *
+try:
+    import mysql.connector
+    from .mysql_ext import *
+except ImportError:
+    print('Unable to import mysql-connector, skipping mysql_ext tests.')
+from .pool import *
+try:
+    from .postgres import *
+except (ImportError, ImproperlyConfigured):
+    print('Unable to import postgres extension tests, skipping.')
+except OperationalError:
+    print('Postgresql test database "peewee_test" not found, skipping '
+          'the postgres_ext tests.')
+from .pwiz_integration import *
+from .reflection import *
+from .shortcuts import *
+from .signals import *
+try:
+    from .sqlcipher_ext import *
+except ImportError:
+    print('Unable to import SQLCipher extension tests, skipping.')
+try:
+    from .sqlite import *
+except ImportError:
+    print('Unable to import sqlite extension tests, skipping.')
+try:
+    from .sqlite_changelog import *
+except ImportError:
+    print('Unable to import sqlite changelog tests, skipping.')
+from .sqliteq import *
+from .sqlite_udf import *
+from .test_utils import *
+
+try:
+    from .pwasyncio import *
+except (ImportError, SyntaxError):
+    print('Unable to import asyncio tests, skipping.')
+
+try:
+    from .pydantic_utils import *
+except (ImportError, SyntaxError):
+    print('Unable to import pydantic tests, skipping.')

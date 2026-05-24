@@ -1,0 +1,55 @@
+id: I_click_cli
+title: "Bug修复：Click CLI 框架"
+category: debugging
+difficulty: 白银
+language: python
+tags: ["调试", "CLI框架", "白银", "Bug修复"]
+timeout: 300
+max_iterations: 3
+
+judge_mode: project_test
+source_dir: source
+test_files:
+  - tests/
+
+total_tests: 1440
+test_command: "python -m pytest .judge/tests/ --tb=short -q -m 'not stress'"
+
+requires:
+  - pytest
+
+description: |
+  Click 是 Python 最流行的命令行框架之一（~8800行核心代码），提供了优雅的命令行接口构建能力。
+  当前版本中存在约10个 bug，分布在类型系统、命令解析、帮助格式化、上下文管理等多个子系统中。
+  你的任务是定位并修复这些 bug，使尽可能多的测试用例通过。
+
+  ## 项目结构
+
+  - `click/` — CLI 框架核心包
+    - `core.py` — Command / Group / Option / Argument / Context 等核心类（~3500行）
+    - `types.py` — 参数类型系统：Choice / IntRange / FloatRange / File / DateTime 等（~1300行）
+    - `formatting.py` — 帮助文本格式化：HelpFormatter / wrap_text 等（~300行）
+    - `decorators.py` — @command / @option / @argument 等装饰器
+    - `parser.py` — 底层命令行解析器
+    - `utils.py` — 工具函数
+    - `testing.py` — CliRunner 测试辅助
+
+  ## 已知现象（来自用户反馈）
+
+  1. IntRange 带 open bound + clamp 时，值被 clamp 到错误的方向
+  2. Choice(case_sensitive=False) 无法正确匹配大小写不同的输入
+  3. File 类型在写入模式下不再 lazy 打开，读取模式却变成 lazy
+  4. Group 的子命令列表不再按字母排序
+  5. 带 -v/--verbose 这样的短长选项对，参数名取自短选项而非长选项
+  6. 子命令的 auto_envvar_prefix 不再正确大写
+  7. 帮助文本中参数的 metavar 后缀 "..." 出现在错误的位置
+  8. Group 在解析子命令时，子命令名和参数被交换
+  9. HelpFormatter 的 dedent 实际在增加缩进而非减少
+  10. 帮助文本中选项的短/长标志显示顺序反转
+
+  ## 调试提示
+
+  - 测试基于 pytest，可以直接运行
+  - 所有 bug 均为单行修改，不涉及 API 变更
+  - bug 分布在 core.py / types.py / formatting.py 三个文件中
+  - 建议先按测试文件分组运行，定位故障范围后再逐个修复

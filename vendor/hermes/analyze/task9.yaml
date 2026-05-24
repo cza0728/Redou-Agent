@@ -1,0 +1,53 @@
+id: J_jinja2_ext
+title: "功能扩展：Jinja2 模板引擎自定义扩展"
+category: debugging
+difficulty: 白银
+language: python
+tags: ["功能扩展", "模板引擎", "白银", "Extension"]
+timeout: 300
+max_iterations: 3
+
+judge_mode: project_test
+source_dir: source
+test_files:
+  - tests/
+
+total_tests: 950
+test_command: "python -m pytest .judge/tests/ --tb=short -q"
+
+requires:
+  - pytest
+  - markupsafe
+  - trio
+
+description: |
+  Jinja2 是 Python 最流行的模板引擎之一（Flask 的默认模板引擎）。
+  它提供了强大的 Extension API，允许开发者添加自定义标签和行为。
+
+  你的任务是基于 Jinja2 的 Extension API，实现两个自定义模板扩展，
+  创建 `jinja2_extensions.py` 文件（位于工作区根目录）。
+
+  ## 需要实现的扩展
+
+  ### 1. SpacelessExtension
+  - 标签: `{% spaceless %}...{% endspaceless %}`
+  - 功能: 移除 HTML 标签之间的空白字符，保留标签内文本内容
+  - 示例: `<p>  <a>foo</a>  </p>` → `<p><a>foo</a></p>`
+
+  ### 2. SwitchExtension
+  - 标签: `{% switch expr %}{% case value %}...{% default %}...{% endswitch %}`
+  - 功能: 类似编程语言的 switch/case 控制结构
+  - 支持多个 case 分支和可选的 default 分支
+
+  ## 项目结构
+
+  - `jinja2/` — Jinja2 模板引擎源码（不要修改）
+  - `README.md` — 详细的需求规范和实现提示
+
+  ## 实现提示
+
+  - 继承 `jinja2.ext.Extension`，设置 `tags` 属性
+  - 实现 `parse()` 方法处理自定义标签的解析
+  - SpacelessExtension 推荐使用 `nodes.CallBlock` 进行后处理
+  - SwitchExtension 推荐将 case 分支编译为 `nodes.If` / elif / else 链
+  - 详细规范请参考 `source/README.md`

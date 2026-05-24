@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "tasks": {
+    "1": {
+      "title": "Docker 测试环境搭建",
+      "task_file": "task1.md",
+      "grade_script": "task1_grade_all.sh",
+      "phases": [
+        {
+          "name": "Task1 Phase 1: Files",
+          "points": 20,
+          "ability": "环境规划与文件交付"
+        },
+        {
+          "name": "Task1 Phase 2: Compose Service",
+          "points": 20,
+          "ability": "Docker Compose 配置"
+        },
+        {
+          "name": "Task1 Phase 3: Toolchain",
+          "points": 25,
+          "ability": "容器工具链验证"
+        },
+        {
+          "name": "Task1 Phase 4: Workspace Mount",
+          "points": 20,
+          "ability": "挂载与路径合规"
+        },
+        {
+          "name": "Task1 Phase 5: Docs",
+          "points": 15,
+          "ability": "报告与复现说明"
+        }
+      ]
+    },
+    "2": {
+      "title": "Agent Task Board Web 原型",
+      "task_file": "task2.md",
+      "grade_script": "task2_grade_all.sh",
+      "phases": [
+        {
+          "name": "Phase 0: Environment",
+          "points": 10,
+          "ability": "Docker 环境合规"
+        },
+        {
+          "name": "Phase 1: Scaffold",
+          "points": 15,
+          "ability": "前端项目搭建"
+        },
+        {
+          "name": "Phase 2: Data Logic",
+          "points": 20,
+          "ability": "状态建模与数据逻辑"
+        },
+        {
+          "name": "Phase 3: UI and Build",
+          "points": 20,
+          "ability": "交互 UI 与构建"
+        },
+        {
+          "name": "Phase 4: Runtime Curl",
+          "points": 20,
+          "ability": "运行验证"
+        },
+        {
+          "name": "Phase 5: Report",
+          "points": 15,
+          "ability": "交付报告"
+        }
+      ]
+    },
+    "3": {
+      "title": "Bug Fix Lab 自动调试",
+      "task_file": "task3.md",
+      "grade_script": "task3_grade_all.sh",
+      "phases": [
+        {
+          "name": "Task3 Phase 0: Environment",
+          "points": 10,
+          "ability": "Docker 环境合规"
+        },
+        {
+          "name": "Task3 Phase 1: Scaffold",
+          "points": 15,
+          "ability": "项目搭建"
+        },
+        {
+          "name": "Task3 Phase 2: Initial Failure",
+          "points": 20,
+          "ability": "测试设计与失败复现"
+        },
+        {
+          "name": "Task3 Phase 3: Final Pass",
+          "points": 20,
+          "ability": "调试修复闭环"
+        },
+        {
+          "name": "Task3 Phase 4: Behavior",
+          "points": 20,
+          "ability": "边界行为验证"
+        },
+        {
+          "name": "Task3 Phase 5: Report",
+          "points": 15,
+          "ability": "调试报告"
+        }
+      ]
+    },
+    "4": {
+      "title": "调研分析与产品方案设计",
+      "task_file": "task4.md",
+      "grade_script": "task4_grade_all.sh",
+      "phases": [
+        {
+          "name": "Task4 Phase 0: Environment",
+          "points": 10,
+          "ability": "Docker 环境合规"
+        },
+        {
+          "name": "Task4 Phase 1: Sources and Notes",
+          "points": 20,
+          "ability": "检索与资料记录"
+        },
+        {
+          "name": "Task4 Phase 2: Report and Comparison",
+          "points": 25,
+          "ability": "对比分析"
+        },
+        {
+          "name": "Task4 Phase 3: Product Design",
+          "points": 25,
+          "ability": "产品方案设计"
+        },
+        {
+          "name": "Task4 Phase 4: Citation Quality",
+          "points": 10,
+          "ability": "引用可信度"
+        },
+        {
+          "name": "Task4 Phase 5: Delivery",
+          "points": 10,
+          "ability": "文件交付"
+        }
+      ]
+    },
+    "5": {
+      "title": "Peewee ORM industrial bug fixing",
+      "task_file": "task5.md",
+      "grade_script": "task5_grade_all.sh",
+      "phases": [
+        {
+          "name": "Task5 Phase 1: Working Copy",
+          "points": 10,
+          "ability": "Isolated project setup"
+        },
+        {
+          "name": "Task5 Phase 2: Automated Tests",
+          "points": 75,
+          "ability": "Industrial debugging and repair"
+        },
+        {
+          "name": "Task5 Phase 3: Report",
+          "points": 15,
+          "ability": "Documentation and reproducibility"
+        }
+      ]
+    },
+    "6": {
+      "title": "Bottle web framework plugin extension",
+      "task_file": "task6.md",
+      "grade_script": "task6_grade_all.sh",
+      "phases": [
+        {
+          "name": "Task6 Phase 1: Working Copy",
+          "points": 10,
+          "ability": "Isolated project setup"
+        },
+        {
+          "name": "Task6 Phase 2: Automated Tests",
+          "points": 75,
+          "ability": "Framework extension and API integration"
+        },
+        {
+          "name": "Task6 Phase 3: Report",
+          "points": 15,
+          "ability": "Documentation and reproducibility"
+        }
+      ]
+    },
+    "7": {
+      "title": "Markdown parser implementation",
+      "task_file": "task7.md",
+      "grade_script": "task7_grade_all.sh",
+      "phases": [
+        {
+          "name": "Task7 Phase 1: Working Copy",
+          "points": 10,
+          "ability": "Isolated project setup"
+        },
+        {
+          "name": "Task7 Phase 2: Automated Tests",
+          "points": 75,
+          "ability": "Parsing and edge cases"
+        },
+        {
+          "name": "Task7 Phase 3: Report",
+          "points": 15,
+          "ability": "Documentation and reproducibility"
+        }
+      ]
+    },
+    "8": {
+      "title": "Click CLI framework bug fixing",
+      "task_file": "task8.md",
+      "grade_script": "task8_grade_all.sh",
+      "phases": [
+        {
+          "name": "Task8 Phase 1: Working Copy",
+          "points": 10,
+          "ability": "Isolated project setup"
+        },
+        {
+          "name": "Task8 Phase 2: Automated Tests",
+          "points": 75,
+          "ability": "Complex debugging and repair"
+        },
+        {
+          "name": "Task8 Phase 3: Report",
+          "points": 15,
+          "ability": "Documentation and reproducibility"
+        }
+      ]
+    },
+    "9": {
+      "title": "Jinja2 custom extension development",
+      "task_file": "task9.md",
+      "grade_script": "task9_grade_all.sh",
+      "phases": [
+        {
+          "name": "Task9 Phase 1: Working Copy",
+          "points": 10,
+          "ability": "Isolated project setup"
+        },
+        {
+          "name": "Task9 Phase 2: Automated Tests",
+          "points": 75,
+          "ability": "Framework extension and API integration"
+        },
+        {
+          "name": "Task9 Phase 3: Report",
+          "points": 15,
+          "ability": "Documentation and reproducibility"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,54 @@
+id: H_markdown_parser
+title: "从零实现：Markdown 解析器"
+category: debugging
+difficulty: 钻石
+language: python
+tags: ["从零实现", "解析器", "文本处理", "工业级"]
+timeout: 300
+max_iterations: 3
+
+judge_mode: project_test
+source_dir: source
+test_files:
+  - tests/
+
+total_tests: 108
+test_command: "python .judge/tests/run_all.py"
+
+requires:
+  - pytest
+
+description: |
+  从零实现一个 Markdown 到 HTML 的转换器。
+
+  你的任务是创建 `markdown_parser.py`，实现 `parse(text: str) -> str` 函数，
+  将 Markdown 文本转换为 HTML。
+
+  ## 支持的语法
+
+  ### 块级元素
+  - 标题（# ~ ######）
+  - 段落
+  - 代码块（围栏式 ```）
+  - 引用块（> ）
+  - 无序列表（-、*、+）
+  - 有序列表（1.）
+  - 水平线（---、***、___）
+
+  ### 行内元素
+  - 粗体（**text**）
+  - 斜体（*text*）
+  - 行内代码（`code`）
+  - 链接（[text](url)）
+  - 图片（![alt](url)）
+  - 删除线（~~text~~）
+  - 转义字符（\*、\# 等）
+
+  ## 评估方式
+
+  - 108 个隐藏测试，按通过率打分
+  - 基础测试 41 个（标题、段落、行内格式）
+  - 中级测试 33 个（列表、链接、代码块、引用）
+  - 高级测试 34 个（表格、深层嵌套、边界情况）
+
+  请仔细阅读 README.md 中的完整规范。

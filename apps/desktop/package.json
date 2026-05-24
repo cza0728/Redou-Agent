@@ -1,0 +1,130 @@
+{
+  "name": "redou-agent-desktop",
+  "productName": "Redou Agent",
+  "version": "0.3.4",
+  "private": true,
+  "description": "Redou Agent desktop shell",
+  "homepage": "https://github.com/herb711/RedouAgent",
+  "author": {
+    "name": "Redou Agent",
+    "email": "herb711@users.noreply.github.com"
+  },
+  "main": "src/main.cjs",
+  "scripts": {
+    "prebuild": "npm --prefix ../../vendor/hermes/web run build",
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win nsis",
+    "build:linux": "electron-builder --linux AppImage deb",
+    "test": "node --test --test-force-exit --test-reporter=dot tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.redou.agent",
+    "productName": "RedouAgent",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "herb711",
+        "repo": "RedouAgent"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "assets/**/*"
+    ],
+    "asarUnpack": [
+      "src/**/*.py"
+    ],
+    "extraResources": [
+      {
+        "from": "../../vendor/hermes",
+        "to": "vendor/hermes",
+        "filter": [
+          "**/*",
+          "!**/node_modules/**",
+          "!**/__pycache__/**",
+          "!**/.pytest_cache/**",
+          "!**/.mypy_cache/**",
+          "!**/.ruff_cache/**",
+          "!**/*.pyc",
+          "!**/*.pyo",
+          "!**/*.egg-info/**",
+          "!.env",
+          "!.git/**",
+          "!web/dist/**",
+          "!web/public/ds-assets/**",
+          "!web/public/fonts/**",
+          "!ui-tui/dist/**",
+          "!ui-tui/packages/hermes-ink/dist/**",
+          "!website/build/**",
+          "!website/out/**",
+          "!website/.vitepress/dist/**"
+        ]
+      }
+    ],
+    "extraMetadata": {
+      "main": "src/main.cjs"
+    },
+    "win": {
+      "artifactName": "Redou-Agent-Setup-${version}.${ext}",
+      "icon": "assets/icons/redou-agent.ico",
+      "target": "nsis"
+    },
+    "linux": {
+      "artifactName": "Redou-Agent-${version}-${arch}.${ext}",
+      "category": "Development",
+      "icon": "assets/icons/redou-agent.png",
+      "maintainer": "Redou Agent <herb711@users.noreply.github.com>",
+      "desktop": {
+        "entry": {
+          "Name": "Redou Agent",
+          "StartupWMClass": "Redou Agent"
+        }
+      },
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "python3.12 | python3.11 | python3 (>= 3.11)",
+        "python3.12-venv | python3.11-venv | python3-venv",
+        "python3-pip",
+        "nodejs",
+        "npm",
+        "git",
+        "bash"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Redou Agent",
+      "uninstallDisplayName": "Redou Agent ${version}",
+      "include": "build/installer.nsh",
+      "installerIcon": "assets/icons/redou-agent-install.ico",
+      "uninstallerIcon": "assets/icons/redou-agent-install.ico"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
+  }
+}

@@ -1,0 +1,52 @@
+id: F_peewee_industrial
+title: "工业级调试：peewee ORM"
+category: debugging
+difficulty: 钻石
+language: python
+tags: ["调试", "ORM", "工业级", "屎山修复"]
+timeout: 300
+max_iterations: 3
+
+judge_mode: project_test
+source_dir: source
+test_files:
+  - tests/
+
+total_tests: 801
+test_command: "python .judge/tests/run_all.py"
+
+requires:
+  - pytest
+
+description: |
+  peewee 是一个轻量级 Python ORM 库（~8500行核心代码），支持 SQLite/PostgreSQL/MySQL。
+  当前版本中存在多个 bug，分布在字段处理、查询构建、模型操作、事务管理等多个子系统中。
+  你的任务是定位并修复这些 bug，使尽可能多的测试用例通过。
+
+  ## 项目结构
+
+  - `peewee.py` — ORM 核心（8522行），包含 Field / Query / Model / Database 等所有核心类
+  - `playhouse/` — 扩展模块（shortcuts, signals, hybrid 等）
+  - `pwiz.py` — 数据库反射工具
+
+  ## 已知现象（来自用户反馈）
+
+  1. 整数字段存取后类型变为浮点数，导致主键比较和外键关联异常
+  2. 带微秒的 datetime 字符串解析后丢失微秒精度
+  3. 事务嵌套(savepoint)行为异常——正常操作被回滚，异常操作被提交
+  4. Model.get_or_create() 对已存在记录返回错误的 created 标志
+  5. SELECT DISTINCT 查询未生效
+  6. 分页查询存在 off-by-one 错误（第1页跳过第一条记录）
+  7. ASC/DESC 排序方向完全相反
+  8. 空集合 IN 查询返回全部记录而非空集
+  9. NULL 值比较使用 = 而非 IS，导致 WHERE x = NULL 永远不匹配
+  10. count() 在空表上返回 None 而非 0
+
+  以上仅为部分已知症状，实际 bug 数量更多。请通过阅读代码和运行测试自行发现其余问题。
+
+  ## 调试提示
+
+  - 测试基于 unittest，可以用 pytest 直接运行
+  - 不要修改公共 API（类名、函数签名），否则测试会找不到
+  - bug 分布在 peewee.py 的多个子系统中，playhouse 和 pwiz 无 bug
+  - 建议先分模块跑测试定位故障范围，再逐个修复

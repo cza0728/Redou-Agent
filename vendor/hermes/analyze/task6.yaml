@@ -1,0 +1,48 @@
+id: G_bottle_feature
+title: "功能扩展：Bottle Web 框架"
+category: debugging
+difficulty: 钻石
+language: python
+tags: ["功能开发", "Web框架", "插件系统", "工业级"]
+timeout: 300
+max_iterations: 3
+
+judge_mode: project_test
+source_dir: source
+test_files:
+  - tests/
+
+total_tests: 429
+test_command: "python .judge/tests/run_all.py"
+
+requires:
+  - pytest
+
+description: |
+  Bottle 是一个轻量级 Python Web 微框架（约 4500 行，单文件），零外部依赖。
+  当前版本功能完整，所有现有测试均可通过。
+
+  你的任务是为 Bottle 框架添加 4 个新的 Plugin，实现以下功能：
+  1. **Session 插件** — 基于签名 Cookie 的无状态会话管理
+  2. **CORS 插件** — 跨域资源共享支持
+  3. **限流插件** — 基于内存的请求速率限制
+  4. **ETag 缓存插件** — 自动 ETag 生成和条件请求处理
+
+  ## 项目结构
+
+  - `bottle.py` — Bottle 框架源码（不要修改）
+  - `bottle_plugins.py` — 你需要创建这个文件，实现 4 个 Plugin
+  - `README.md` — 详细的接口规范和使用示例
+
+  ## 评估方式
+
+  - 现有的 Bottle 框架测试必须继续通过（确保你没有破坏原有功能）
+  - 4 个新 Plugin 各有独立的隐藏测试
+  - 请仔细阅读 README.md 中的接口规范
+
+  ## 实现提示
+
+  - 所有 Plugin 遵循 Bottle Plugin API v2（name, api=2, setup, apply）
+  - 只使用 Python 标准库
+  - 可以 `import bottle` 使用框架内部 API
+  - 参考 bottle.py 中的 JSONPlugin 和 TemplatePlugin 了解 Plugin 编写模式
