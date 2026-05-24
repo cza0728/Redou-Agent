@@ -28,8 +28,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "herb711",
-        "repo": "RedouAgent"
+        "owner": "cza0728",
+        "repo": "Redou-Agent"
       }
     ],
     "directories": {
@@ -76,7 +76,8 @@
     "win": {
       "artifactName": "Redou-Agent-Setup-${version}.${ext}",
       "icon": "assets/icons/redou-agent.ico",
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": false
     },
     "linux": {
       "artifactName": "Redou-Agent-${version}-${arch}.${ext}",
