@@ -247,12 +247,18 @@ function AnalysisLogsTab() {
       .finally(() => setLoadingDetail(false));
   }, [selectedKey]);
 
-  // Clear chat when switching logs
+  // Load persisted chat history when switching logs
   useEffect(() => {
     setChatMessages([]);
     setChatError(null);
     if (selectedKey) {
-      redouApi.clearAnalysisLogChat(selectedKey).catch(() => {});
+      redouApi.getAnalysisLogChatHistory(selectedKey)
+        .then((history) => {
+          if (history?.messages?.length > 0) {
+            setChatMessages(history.messages.map((m) => ({ role: m.role, content: m.content })));
+          }
+        })
+        .catch(() => {});
     }
   }, [selectedKey]);
 

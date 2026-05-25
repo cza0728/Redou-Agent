@@ -26,6 +26,15 @@ class LifecycleService {
     } else if (!hasSeededDefaultProject) {
       fs.writeFileSync(seedPath, `${new Date().toISOString()}\n`, "utf8");
     }
+    // Clean up stale "running" benchmarks once on first startup only
+    if (!this._benchmarksCleaned) {
+      this._benchmarksCleaned = true;
+      try {
+        if (typeof host.cleanStaleBenchmarks === "function") {
+          host.cleanStaleBenchmarks();
+        }
+      } catch { /* best effort */ }
+    }
     this.disposed = false;
     return { ok: true };
   }

@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("redouDesktop", {
   setModelAssignment: (body) => ipcRenderer.invoke("redou:model-set", body),
   refreshModelSetupModels: (body) => ipcRenderer.invoke("redou:model-setup-refresh", body),
   setupMainModel: (body) => ipcRenderer.invoke("redou:model-setup", body),
+  deleteModelApiKey: (provider, apiKeyEnv) => ipcRenderer.invoke("redou:model-delete-key", provider, apiKeyEnv),
+  hideBenchmarkModel: (modelKey) => ipcRenderer.invoke("redou:model-hide-benchmark", modelKey),
   getAnalytics: (days) => ipcRenderer.invoke("redou:analytics:usage", days),
   getModelsAnalytics: (days) => ipcRenderer.invoke("redou:analytics:models", days),
   getLogs: (params) => ipcRenderer.invoke("redou:logs", params),
@@ -61,6 +63,7 @@ contextBridge.exposeInMainWorld("redouDesktop", {
   getAnalysisLogDetail: (key) => ipcRenderer.invoke("redou:analysis:log-detail", key),
   chatWithAnalysisLog: (body) => ipcRenderer.invoke("redou:analysis:log-chat", body),
   clearAnalysisLogChat: (sessionKey) => ipcRenderer.invoke("redou:analysis:log-chat-clear", sessionKey),
+  getAnalysisLogChatHistory: (sessionKey) => ipcRenderer.invoke("redou:analysis:log-chat-history", sessionKey),
   getChatProjects: () => ipcRenderer.invoke("redou:projects:list"),
   createChatProject: (body) => ipcRenderer.invoke("redou:projects:create", body),
   updateChatProject: (projectId, body) =>

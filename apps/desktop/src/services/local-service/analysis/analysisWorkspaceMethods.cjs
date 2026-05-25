@@ -658,13 +658,23 @@ class AnalysisWorkspaceMethods {
       fallbackCreated = true;
     }
 
-    const up = async () => this.runAnalysisShellCommand({
+    const up = async (extraEnv = {}) => this.runAnalysisShellCommand({
       command: "docker",
       args: ["compose", "up", "-d", "--build"],
       cwd: workspacePath,
       timeoutMs: 900000,
+      env: extraEnv,
     });
     let upResult = await up();
+    // If build failed due to registry/network error, retry with legacy builder (uses local cache)
+    if (upResult.code !== 0) {
+      const output = (upResult.output || "") + (upResult.error || "");
+      const isRegistryError = /FAILED TO (AUTHORIZE|DO REQUEST)|registry|FETCH OAUTH TOKEN|LOAD METADATA/i.test(output);
+      if (isRegistryError) {
+        this.log?.("Docker build failed due to registry connectivity — retrying with legacy builder (DOCKER_BUILDKIT=0)");
+        upResult = await up({ DOCKER_BUILDKIT: "0" });
+      }
+    }
     if (upResult.code !== 0 && !fallbackCreated) {
       this.writeAnalysisFallbackDockerEnvironment(
         workspacePath,

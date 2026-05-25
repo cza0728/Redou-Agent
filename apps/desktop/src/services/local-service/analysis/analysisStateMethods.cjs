@@ -1,7 +1,8 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { chatWithAnalysisLog, clearConversation: clearLogChatConversation } = require("./analysisLogChat.cjs");
+const { chatWithAnalysisLog, clearConversation: clearLogChatConversation, getConversationHistory } = require("./analysisLogChat.cjs");
+
 const {
   assertChildPath,
   copyDirectoryRecursive,
@@ -352,6 +353,33 @@ class AnalysisStateMethods {
     });
   }
 
+  cleanStaleBenchmarks() {
+    const store = this.readAnalysisStore();
+    let changed = false;
+    const now = isoNow();
+    for (const result of store.results) {
+      const status = String(result.status || "").toLowerCase();
+      if (status === "running" || status === "queued") {
+        result.status = "interrupted";
+        result.completedAt = result.completedAt || now;
+        result.updatedAt = now;
+        result.summary = (result.summary || "") + "\nInterrupted: application was restarted.";
+        for (const task of result.tasks || []) {
+          const ts = String(task.status || "").toLowerCase();
+          if (ts === "running" || ts === "queued" || ts === "pending") {
+            task.status = "interrupted";
+            task.completedAt = task.completedAt || now;
+          }
+        }
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.writeAnalysisStore(store);
+      this.log?.("Cleaned stale running benchmarks from previous session.");
+    }
+  }
+
   readAnalysisStore() {
     const store = readJson(this.analysisStorePath(), null);
     const fallback = { version: 1, updatedAt: isoNow(), results: [] };
@@ -472,9 +500,10 @@ class AnalysisStateMethods {
       activeAnalysisRuns: this.activeAnalysisItems(),
       analysisQueue: this.analysisQueue,
     });
-    if (snapshot.changed) {
-      this.writeAnalysisStore({ ...store, results: snapshot.results });
-    }
+    // NOTE: Do NOT write back snapshot.changed here.
+    // The snapshot marks orphaned "running" results as "interrupted" for display,
+    // but writing that back during a read can race with active benchmark processes
+    // and incorrectly interrupt running benchmarks when the user navigates between pages.
     return snapshot.response;
   }
 
@@ -686,12 +715,17 @@ class AnalysisStateMethods {
       logDetail,
       locale: body.locale || "zh",
       hermesHome: this.hermesHome,
+      analysisRoot: this.analysisDir(),
     });
   }
 
   clearAnalysisLogChat(sessionKey) {
-    clearLogChatConversation(sessionKey || "default");
+    clearLogChatConversation(this.analysisDir(), sessionKey || "default");
     return { ok: true };
+  }
+
+  getAnalysisLogChatHistory(sessionKey) {
+    return getConversationHistory(this.analysisDir(), sessionKey || "default");
   }
 
   startAnalysisQueue() {

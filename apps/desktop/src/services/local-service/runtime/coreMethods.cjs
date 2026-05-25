@@ -40,34 +40,237 @@ function sanitizeChildEnv(env) {
   return clean;
 }
 
-function _catalogEntry(o) {
+function _catalogEntry(o, dotEnv) {
+  const envKey = o.api_key_env || "";
+  const hasKey = !!(process.env[envKey] || (dotEnv && dotEnv[envKey]));
+  const baseUrlEnvKey = o.base_url_env || "";
+  const userBaseUrl = baseUrlEnvKey
+    ? (process.env[baseUrlEnvKey] || (dotEnv && dotEnv[baseUrlEnvKey]) || "")
+    : "";
   return {
     provider: o.provider, label: o.label, description: o.description || "",
-    base_url: o.base_url || "", api_key_env: o.api_key_env || "",
-    base_url_env: o.base_url_env || "", models: o.models || [],
+    base_url: userBaseUrl || o.base_url || "", api_key_env: envKey,
+    base_url_env: baseUrlEnvKey, models: o.models || [],
     default_model: o.default_model || (o.models?.[0] || ""),
     region: o.region || "", tags: o.tags || [], docs_url: o.docs_url || "",
     api_mode: o.api_mode || "", custom_provider_name: o.custom_provider_name || "",
     api_key_optional: o.api_key_optional || false,
-    api_key_set: !!(process.env[o.api_key_env]),
+    api_key_set: hasKey,
     request_timeout_seconds: o.request_timeout_seconds || 300,
     model_timeout_seconds: o.model_timeout_seconds || null,
   };
 }
 
-function _staticProviderCatalog() {
+// --- Persisted benchmark model helpers ---
+
+function _providerModelsPath(hermesHome) {
+  return path.join(hermesHome || "", "provider_models.json");
+}
+
+function _hiddenModelsPath(hermesHome) {
+  return path.join(hermesHome || "", "hidden_benchmark_models.json");
+}
+
+function _readJson(filePath, fallback) {
+  try {
+    if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch { /* corrupted */ }
+  return fallback;
+}
+
+function _writeJson(filePath, data) {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+}
+
+/** Save real models returned by API for a provider */
+function _saveProviderModels(hermesHome, provider, models) {
+  const filePath = _providerModelsPath(hermesHome);
+  const all = _readJson(filePath, {});
+  all[provider] = models;
+  _writeJson(filePath, all);
+}
+
+/** Get real models map: { provider: [models] } */
+function _getProviderModels(hermesHome) {
+  return _readJson(_providerModelsPath(hermesHome), {});
+}
+
+/** Get hidden model keys set */
+function _getHiddenModels(hermesHome) {
+  return new Set(_readJson(_hiddenModelsPath(hermesHome), []));
+}
+
+/** Add a model key to hidden list */
+function _hideModel(hermesHome, modelKey) {
+  const filePath = _hiddenModelsPath(hermesHome);
+  const list = _readJson(filePath, []);
+  if (!list.includes(modelKey)) list.push(modelKey);
+  _writeJson(filePath, list);
+}
+
+/** Remove a model key from hidden list */
+function _unhideModel(hermesHome, modelKey) {
+  const filePath = _hiddenModelsPath(hermesHome);
+  const list = _readJson(filePath, []);
+  _writeJson(filePath, list.filter((k) => k !== modelKey));
+}
+
+/** Clear all hidden entries for a given provider */
+function _unhideProvider(hermesHome, provider) {
+  const filePath = _hiddenModelsPath(hermesHome);
+  const list = _readJson(filePath, []);
+  // Frontend modelKey uses "\n" separator: "provider\nmodel"
+  _writeJson(filePath, list.filter((k) => !k.startsWith(`${provider}\n`)));
+}
+
+function _saveDotEnvValue(envFilePath, key, value) {
+  if (!key || !value) return;
+  let lines = [];
+  try {
+    if (fs.existsSync(envFilePath)) {
+      lines = fs.readFileSync(envFilePath, "utf8").split(/\r?\n/);
+    }
+  } catch { /* fresh file */ }
+  let found = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith(`${key}=`)) {
+      lines[i] = `${key}=${value}`;
+      found = true;
+      break;
+    }
+  }
+  if (!found) lines.push(`${key}=${value}`);
+  const dir = path.dirname(envFilePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(envFilePath, lines.join("\n"), "utf8");
+  // Also set in current process so subsequent reads see it
+  process.env[key] = value;
+}
+
+const https = require("https");
+const http = require("http");
+
+function _httpRequest(options, body) {
+  return new Promise((resolve) => {
+    const lib = options._protocol === "http:" ? http : https;
+    delete options._protocol;
+    const req = lib.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => resolve({ status: res.statusCode, data }));
+    });
+    req.on("error", (err) => resolve({ status: 0, data: err.message }));
+    req.on("timeout", () => { req.destroy(); resolve({ status: 0, data: "timeout" }); });
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Validate API key and fetch real model list from the provider.
+ * Strategy:
+ *  1. Try GET /models — works for OpenAI, DeepSeek, Qwen, etc.
+ *  2. If 404, fallback: POST /chat/completions with max_tokens=1 to verify key validity.
+ * Returns { ok, models, default_model, error }.
+ */
+async function _fetchModels(baseUrl, apiKey, apiMode) {
+  if (!apiKey) {
+    return { ok: false, models: [], default_model: "", error: "API key is empty." };
+  }
+  const cleanBase = (baseUrl || "").replace(/\/+$/, "");
+  const isAnthropic = (apiMode || "").includes("anthropic") || cleanBase.includes("anthropic.com");
+
+  // --- Step 1: Try GET /models ---
+  const modelsEndpoint = isAnthropic ? cleanBase + "/v1/models" : cleanBase + "/models";
+  let modelsUrl;
+  try {
+    modelsUrl = new URL(modelsEndpoint);
+  } catch {
+    return { ok: false, models: [], default_model: "", error: `Invalid base URL: ${baseUrl}` };
+  }
+  const headers = { "Content-Type": "application/json" };
+  if (isAnthropic) {
+    headers["x-api-key"] = apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+  } else {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
+  const modelsRes = await _httpRequest({
+    hostname: modelsUrl.hostname,
+    port: modelsUrl.port || (modelsUrl.protocol === "https:" ? 443 : 80),
+    path: modelsUrl.pathname + (modelsUrl.search || ""),
+    method: "GET",
+    headers,
+    timeout: 10000,
+    _protocol: modelsUrl.protocol,
+  });
+
+  if (modelsRes.status === 401 || modelsRes.status === 403) {
+    return { ok: false, models: [], default_model: "", error: `API key is invalid (HTTP ${modelsRes.status}).` };
+  }
+  if (modelsRes.status === 200) {
+    try {
+      const json = JSON.parse(modelsRes.data);
+      const modelList = (json.data || json.models || [])
+        .map((m) => m.id || m.name || m.model || "")
+        .filter(Boolean);
+      return { ok: true, models: modelList, default_model: modelList[0] || "", error: "" };
+    } catch {
+      return { ok: true, models: [], default_model: "", error: "" };
+    }
+  }
+
+  // --- Step 2: /models returned 404 or other error — try a minimal chat request to verify key ---
+  const chatEndpoint = cleanBase + "/chat/completions";
+  let chatUrl;
+  try {
+    chatUrl = new URL(chatEndpoint);
+  } catch {
+    return { ok: false, models: [], default_model: "", error: `Invalid base URL: ${baseUrl}` };
+  }
+  const chatBody = JSON.stringify({
+    model: "test",
+    messages: [{ role: "user", content: "hi" }],
+    max_tokens: 1,
+  });
+  const chatHeaders = { ...headers, "Content-Length": String(Buffer.byteLength(chatBody)) };
+
+  const chatRes = await _httpRequest({
+    hostname: chatUrl.hostname,
+    port: chatUrl.port || (chatUrl.protocol === "https:" ? 443 : 80),
+    path: chatUrl.pathname + (chatUrl.search || ""),
+    method: "POST",
+    headers: chatHeaders,
+    timeout: 10000,
+    _protocol: chatUrl.protocol,
+  }, chatBody);
+
+  if (chatRes.status === 401 || chatRes.status === 403) {
+    return { ok: false, models: [], default_model: "", error: `API key is invalid (HTTP ${chatRes.status}).` };
+  }
+  if (chatRes.status === 0) {
+    return { ok: false, models: [], default_model: "", error: `Connection failed: ${chatRes.data}` };
+  }
+  // Any other response (200, 400 model not found, etc.) means the key is accepted
+  return { ok: true, models: [], default_model: "", error: "" };
+}
+
+function _staticProviderCatalog(dotEnv) {
   return [
-    _catalogEntry({ provider: "local-vllm", label: "Local vLLM", description: "Local OpenAI-compatible server.", base_url: "http://127.0.0.1:8000/v1", api_key_env: "VLLM_API_KEY", models: ["local-model"], region: "Local", tags: ["vllm", "openai-compatible"], docs_url: "https://docs.vllm.ai/", api_key_optional: true, api_mode: "chat_completions", custom_provider_name: "Local vLLM" }),
-    _catalogEntry({ provider: "deepseek", label: "DeepSeek", description: "DeepSeek chat and reasoning models.", base_url: "https://api.deepseek.com/v1", api_key_env: "DEEPSEEK_API_KEY", base_url_env: "DEEPSEEK_BASE_URL", models: ["deepseek-chat", "deepseek-reasoner"], region: "CN", tags: ["reasoning", "coding"], docs_url: "https://api-docs.deepseek.com/" }),
-    _catalogEntry({ provider: "alibaba", label: "Qwen / DashScope", description: "Alibaba DashScope OpenAI-compatible endpoint.", base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", api_key_env: "DASHSCOPE_API_KEY", base_url_env: "DASHSCOPE_BASE_URL", models: ["qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus"], region: "CN/Global", tags: ["qwen", "coding"], docs_url: "https://help.aliyun.com/zh/model-studio/" }),
-    _catalogEntry({ provider: "kimi-coding-cn", label: "Kimi / Moonshot", description: "Moonshot China endpoint for Kimi models.", base_url: "https://api.moonshot.cn/v1", api_key_env: "KIMI_CN_API_KEY", models: ["kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking"], region: "CN", tags: ["coding", "long-context"], docs_url: "https://platform.moonshot.cn/docs" }),
-    _catalogEntry({ provider: "zai", label: "GLM / Zhipu", description: "Z.AI / Zhipu GLM family.", base_url: "https://api.z.ai/api/paas/v4", api_key_env: "GLM_API_KEY", base_url_env: "GLM_BASE_URL", models: ["glm-5.1", "glm-5", "glm-4.7"], region: "CN/Global", tags: ["reasoning", "coding"], docs_url: "https://docs.z.ai/" }),
-    _catalogEntry({ provider: "minimax-cn", label: "MiniMax", description: "China endpoint for MiniMax M2 models.", base_url: "https://api.minimaxi.com/anthropic", api_key_env: "MINIMAX_CN_API_KEY", base_url_env: "MINIMAX_CN_BASE_URL", models: ["MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1"], region: "CN", tags: ["agent", "anthropic"], docs_url: "https://platform.minimaxi.com/", api_mode: "anthropic_messages" }),
-    _catalogEntry({ provider: "xiaomi", label: "Xiaomi MiMo", description: "Xiaomi MiMo V2.5 and V2 models.", base_url: "https://api.xiaomimimo.com/v1", api_key_env: "XIAOMI_API_KEY", base_url_env: "XIAOMI_BASE_URL", models: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"], region: "CN", tags: ["long-context", "multimodal"], docs_url: "https://platform.xiaomimimo.com/" }),
-    _catalogEntry({ provider: "doubao", label: "Doubao / Volcengine Ark", description: "ByteDance Doubao models through Ark OpenAI-compatible API.", base_url: "https://ark.cn-beijing.volces.com/api/v3", api_key_env: "ARK_API_KEY", models: ["doubao-seed-1-6", "doubao-seed-1-6-251015", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-1-5-pro-32k"], region: "CN", tags: ["fast", "openai-compatible"], docs_url: "https://www.volcengine.com/docs/82379", api_mode: "chat_completions", custom_provider_name: "Doubao / Volcengine Ark" }),
-    _catalogEntry({ provider: "openrouter", label: "OpenRouter", description: "OpenRouter hosted model marketplace.", base_url: "https://openrouter.ai/api/v1", api_key_env: "OPENROUTER_API_KEY", base_url_env: "OPENROUTER_BASE_URL", models: ["anthropic/claude-sonnet-4.5", "openai/gpt-5.1", "google/gemini-3-pro-preview"], region: "Global", tags: ["marketplace"], docs_url: "https://openrouter.ai/docs" }),
-    _catalogEntry({ provider: "openai", label: "OpenAI", description: "OpenAI API models.", base_url: "https://api.openai.com/v1", api_key_env: "OPENAI_API_KEY", models: ["gpt-5.1", "gpt-5.1-mini", "gpt-4.1"], region: "Global", tags: ["tools", "vision"], docs_url: "https://platform.openai.com/docs" }),
-    _catalogEntry({ provider: "anthropic", label: "Anthropic", description: "Claude models through the Anthropic API.", base_url: "https://api.anthropic.com", api_key_env: "ANTHROPIC_API_KEY", models: ["claude-sonnet-4-5", "claude-haiku-4-5"], region: "Global", tags: ["agent", "coding"], docs_url: "https://docs.anthropic.com/", api_mode: "anthropic_messages" }),
+    _catalogEntry({ provider: "local-vllm", label: "Local vLLM", description: "Local OpenAI-compatible server.", base_url: "http://127.0.0.1:8000/v1", api_key_env: "VLLM_API_KEY", models: ["local-model"], region: "Local", tags: ["vllm", "openai-compatible"], docs_url: "https://docs.vllm.ai/", api_key_optional: true, api_mode: "chat_completions", custom_provider_name: "Local vLLM" }, dotEnv),
+    _catalogEntry({ provider: "deepseek", label: "DeepSeek", description: "DeepSeek chat and reasoning models.", base_url: "https://api.deepseek.com/v1", api_key_env: "DEEPSEEK_API_KEY", base_url_env: "DEEPSEEK_BASE_URL", models: ["deepseek-chat", "deepseek-reasoner"], region: "CN", tags: ["reasoning", "coding"], docs_url: "https://api-docs.deepseek.com/" }, dotEnv),
+    _catalogEntry({ provider: "alibaba", label: "Qwen / DashScope", description: "Alibaba DashScope OpenAI-compatible endpoint.", base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", api_key_env: "DASHSCOPE_API_KEY", base_url_env: "DASHSCOPE_BASE_URL", models: ["qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus"], region: "CN/Global", tags: ["qwen", "coding"], docs_url: "https://help.aliyun.com/zh/model-studio/" }, dotEnv),
+    _catalogEntry({ provider: "kimi-coding-cn", label: "Kimi / Moonshot", description: "Moonshot China endpoint for Kimi models.", base_url: "https://api.moonshot.cn/v1", api_key_env: "KIMI_CN_API_KEY", models: ["kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking"], region: "CN", tags: ["coding", "long-context"], docs_url: "https://platform.moonshot.cn/docs" }, dotEnv),
+    _catalogEntry({ provider: "zai", label: "GLM / Zhipu", description: "Z.AI / Zhipu GLM family.", base_url: "https://api.z.ai/api/paas/v4", api_key_env: "GLM_API_KEY", base_url_env: "GLM_BASE_URL", models: ["glm-5.1", "glm-5", "glm-4.7"], region: "CN/Global", tags: ["reasoning", "coding"], docs_url: "https://docs.z.ai/" }, dotEnv),
+    _catalogEntry({ provider: "minimax-cn", label: "MiniMax", description: "China endpoint for MiniMax M2 models.", base_url: "https://api.minimaxi.com/anthropic", api_key_env: "MINIMAX_CN_API_KEY", base_url_env: "MINIMAX_CN_BASE_URL", models: ["MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1"], region: "CN", tags: ["agent", "anthropic"], docs_url: "https://platform.minimaxi.com/", api_mode: "anthropic_messages" }, dotEnv),
+    _catalogEntry({ provider: "xiaomi", label: "Xiaomi MiMo", description: "Xiaomi MiMo V2.5 and V2 models.", base_url: "https://api.xiaomimimo.com/v1", api_key_env: "XIAOMI_API_KEY", base_url_env: "XIAOMI_BASE_URL", models: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"], region: "CN", tags: ["long-context", "multimodal"], docs_url: "https://platform.xiaomimimo.com/" }, dotEnv),
+    _catalogEntry({ provider: "doubao", label: "Doubao / Volcengine Ark", description: "ByteDance Doubao models through Ark OpenAI-compatible API.", base_url: "https://ark.cn-beijing.volces.com/api/v3", api_key_env: "ARK_API_KEY", models: ["doubao-seed-1-6", "doubao-seed-1-6-251015", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-1-5-pro-32k"], region: "CN", tags: ["fast", "openai-compatible"], docs_url: "https://www.volcengine.com/docs/82379", api_mode: "chat_completions", custom_provider_name: "Doubao / Volcengine Ark" }, dotEnv),
+    _catalogEntry({ provider: "openrouter", label: "OpenRouter", description: "OpenRouter hosted model marketplace.", base_url: "https://openrouter.ai/api/v1", api_key_env: "OPENROUTER_API_KEY", base_url_env: "OPENROUTER_BASE_URL", models: ["anthropic/claude-sonnet-4.5", "openai/gpt-5.1", "google/gemini-3-pro-preview"], region: "Global", tags: ["marketplace"], docs_url: "https://openrouter.ai/docs" }, dotEnv),
+    _catalogEntry({ provider: "openai", label: "OpenAI", description: "OpenAI API models.", base_url: "https://api.openai.com/v1", api_key_env: "OPENAI_API_KEY", models: ["gpt-5.1", "gpt-5.1-mini", "gpt-4.1"], region: "Global", tags: ["tools", "vision"], docs_url: "https://platform.openai.com/docs" }, dotEnv),
+    _catalogEntry({ provider: "anthropic", label: "Anthropic", description: "Claude models through the Anthropic API.", base_url: "https://api.anthropic.com", api_key_env: "ANTHROPIC_API_KEY", models: ["claude-sonnet-4-5", "claude-haiku-4-5"], region: "Global", tags: ["agent", "coding"], docs_url: "https://docs.anthropic.com/", api_mode: "anthropic_messages" }, dotEnv),
   ];
 }
 
@@ -467,10 +670,119 @@ class RuntimeCoreMethods {
     }
   }
 
-  runDashboardBridge(action, payload = {}) {
+  async runDashboardBridge(action, payload = {}) {
     if (!this.pythonPath || !fs.existsSync(this.pythonPath)) {
       // Python runtime not available - return safe defaults so the renderer works
       this.log?.(`Dashboard bridge skipped (no Python): action=${action}`);
+
+      // Read .env so catalog entries reflect saved API keys
+      const envFilePath = path.join(this.hermesHome || "", ".env");
+      const dotEnv = readDotEnv(envFilePath);
+
+      // Handle API key save actions natively
+      if (action === "refresh_model_setup_models") {
+        const apiKey = (payload.api_key || "").trim();
+        const apiKeyEnv = (payload.api_key_env || "").trim();
+        const baseUrl = (payload.base_url || "").trim();
+        const baseUrlEnv = (payload.base_url_env || "").trim();
+
+        // Resolve the effective base URL for validation
+        const catalog = _staticProviderCatalog(dotEnv);
+        const match = catalog.find((p) => p.provider === payload.provider);
+        const effectiveBaseUrl = baseUrl || (match?.base_url) || "";
+        const apiMode = match?.api_mode || "";
+        const effectiveKey = apiKey || process.env[apiKeyEnv] || dotEnv[apiKeyEnv] || "";
+
+        // Validate API key by fetching real models from the provider (soft validation)
+        if (effectiveKey && effectiveBaseUrl) {
+          this.log?.(`Validating API key for ${payload.provider} at ${effectiveBaseUrl}...`);
+          const fetchResult = await _fetchModels(effectiveBaseUrl, effectiveKey, apiMode);
+          // Hard fail ONLY on explicit "key invalid" (401/403). Network errors are soft warnings.
+          const keyExplicitlyRejected = fetchResult.error && /\(HTTP 40[13]\)/.test(fetchResult.error);
+          if (keyExplicitlyRejected) {
+            this.log?.(`API key rejected for ${payload.provider}: ${fetchResult.error}`);
+            return {
+              ok: false, scope: "main", provider: payload.provider || "",
+              base_url: effectiveBaseUrl, api_key_env: apiKeyEnv,
+              api_key_set: false, models: [], default_model: "",
+              model_count: 0, refreshed: false,
+              warning: fetchResult.error,
+            };
+          }
+          // Save the key (even if validation had network issues — user can retry later)
+          if (apiKey && apiKeyEnv) {
+            _saveDotEnvValue(envFilePath, apiKeyEnv, apiKey);
+          }
+          if (baseUrl && baseUrlEnv) {
+            _saveDotEnvValue(envFilePath, baseUrlEnv, baseUrl);
+          }
+          const realModels = fetchResult.models.length > 0 ? fetchResult.models : (match?.models || []);
+          _saveProviderModels(this.hermesHome, payload.provider, realModels);
+          _unhideProvider(this.hermesHome, payload.provider);
+          const warning = fetchResult.ok ? "" : `Saved, but validation skipped: ${fetchResult.error}`;
+          return {
+            ok: true, scope: "main", provider: payload.provider || "",
+            base_url: effectiveBaseUrl, api_key_env: apiKeyEnv,
+            api_key_set: true,
+            models: realModels,
+            default_model: payload.model || fetchResult.default_model || realModels[0] || "",
+            model_count: realModels.length,
+            refreshed: fetchResult.ok, warning,
+          };
+        }
+
+        // No key provided at all
+        return {
+          ok: false, scope: "main", provider: payload.provider || "",
+          base_url: effectiveBaseUrl, api_key_env: apiKeyEnv,
+          api_key_set: false, models: match?.models || [],
+          default_model: match?.default_model || "",
+          model_count: (match?.models || []).length,
+          refreshed: false, warning: "No API key provided.",
+        };
+      }
+
+      if (action === "setup_main_model") {
+        const apiKey = (payload.api_key || "").trim();
+        const apiKeyEnv = (payload.api_key_env || "").trim();
+        const baseUrl = (payload.base_url || "").trim();
+        const baseUrlEnv = (payload.base_url_env || "").trim();
+        if (apiKey && apiKeyEnv) {
+          _saveDotEnvValue(envFilePath, apiKeyEnv, apiKey);
+        }
+        if (baseUrl && baseUrlEnv) {
+          _saveDotEnvValue(envFilePath, baseUrlEnv, baseUrl);
+        }
+        return {
+          ok: true, scope: "main",
+          provider: payload.provider || "", model: payload.model || "",
+          base_url: baseUrl, api_key_env: apiKeyEnv,
+        };
+      }
+
+      if (action === "delete_model_api_key") {
+        const apiKeyEnv = (payload.api_key_env || "").trim();
+        if (apiKeyEnv) {
+          try {
+            if (fs.existsSync(envFilePath)) {
+              let lines = fs.readFileSync(envFilePath, "utf8").split(/\r?\n/);
+              lines = lines.filter((l) => !l.trim().startsWith(`${apiKeyEnv}=`));
+              fs.writeFileSync(envFilePath, lines.join("\n"), "utf8");
+            }
+          } catch { /* best effort */ }
+          delete process.env[apiKeyEnv];
+        }
+        return { ok: true };
+      }
+
+      if (action === "hide_benchmark_model") {
+        const modelKey = (payload.model_key || "").trim();
+        if (modelKey) {
+          _hideModel(this.hermesHome, modelKey);
+        }
+        return { ok: true };
+      }
+
       const defaults = {
         // Config
         get_config: {},
@@ -490,12 +802,22 @@ class RuntimeCoreMethods {
           auto_context_length: 0, config_context_length: 0,
           effective_context_length: 0, capabilities: {},
         },
-        get_model_options: { providers: _staticProviderCatalog(), model: "codex", provider: "openai" },
-        get_model_setup_catalog: { providers: _staticProviderCatalog(), current: { model: "codex", provider: "openai", base_url: "" } },
+        get_model_options: { providers: _staticProviderCatalog(dotEnv), model: "codex", provider: "openai" },
+        get_model_setup_catalog: (() => {
+          const staticCatalog = _staticProviderCatalog(dotEnv);
+          const realModelsMap = _getProviderModels(this.hermesHome);
+          const hiddenSet = _getHiddenModels(this.hermesHome);
+          // Merge real models into catalog
+          const providers = staticCatalog.map((p) => {
+            if (realModelsMap[p.provider]) {
+              return { ...p, models: realModelsMap[p.provider] };
+            }
+            return p;
+          });
+          return { providers, current: { model: "codex", provider: "openai", base_url: "" }, hidden_models: [...hiddenSet] };
+        })(),
         get_auxiliary_models: { tasks: [], main: { provider: "openai", model: "codex" } },
         set_model_assignment: { ok: true },
-        refresh_model_setup_models: { ok: true },
-        setup_main_model: { ok: true },
         // Analytics
         get_models_analytics: {
           models: [], period_days: 30,

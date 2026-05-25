@@ -57,6 +57,9 @@ declare global {
       getAnalysisLogDetail?: (key: string) => Promise<AnalysisLogDetail | null>;
       chatWithAnalysisLog?: (body: AnalysisLogChatRequest) => Promise<AnalysisLogChatResponse>;
       clearAnalysisLogChat?: (sessionKey: string) => Promise<{ ok: boolean }>;
+      getAnalysisLogChatHistory?: (sessionKey: string) => Promise<AnalysisLogChatHistoryResponse>;
+      deleteModelApiKey?: (provider: string, apiKeyEnv: string) => Promise<{ ok: boolean }>;
+      hideBenchmarkModel?: (modelKey: string) => Promise<{ ok: boolean }>;
       getAnalytics?: (days: number) => Promise<AnalyticsResponse>;
       getChatProjects?: () => Promise<ChatProjectsResponse>;
       getLogs?: (
@@ -317,6 +320,12 @@ const redouApiCore = {
       requireRedouMethod("chatWithAnalysisLog")(body),
     clearAnalysisLogChat: (sessionKey: string) =>
       requireRedouMethod("clearAnalysisLogChat")(sessionKey),
+    getAnalysisLogChatHistory: (sessionKey: string) =>
+      requireRedouMethod("getAnalysisLogChatHistory")(sessionKey),
+    deleteModelApiKey: (provider: string, apiKeyEnv: string) =>
+      requireRedouMethod("deleteModelApiKey")(provider, apiKeyEnv),
+    hideBenchmarkModel: (modelKey: string) =>
+      requireRedouMethod("hideBenchmarkModel")(modelKey),
     onAnalysisEvent: (callback: (payload: AnalysisBenchmarkEvent) => void) =>
       requireRedouMethod("onAnalysisEvent")(callback),
   },
@@ -488,6 +497,9 @@ export const redouApi = {
   getAnalysisLogDetail: redouApiCore.analytics.getAnalysisLogDetail,
   chatWithAnalysisLog: redouApiCore.analytics.chatWithAnalysisLog,
   clearAnalysisLogChat: redouApiCore.analytics.clearAnalysisLogChat,
+  getAnalysisLogChatHistory: redouApiCore.analytics.getAnalysisLogChatHistory,
+  deleteModelApiKey: redouApiCore.analytics.deleteModelApiKey,
+  hideBenchmarkModel: redouApiCore.analytics.hideBenchmarkModel,
   onAnalysisEvent: redouApiCore.analytics.onAnalysisEvent,
   getConfig: redouApiCore.settings.getConfig,
   getDefaults: redouApiCore.settings.getDefaults,
@@ -1266,6 +1278,11 @@ export interface AnalysisLogChatResponse {
   model: string;
 }
 
+export interface AnalysisLogChatHistoryResponse {
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  summary: string;
+}
+
 export interface CronJob {
   id: string;
   name?: string | null;
@@ -1422,6 +1439,7 @@ export interface ModelSetupCatalogResponse {
     model: string;
     base_url: string;
   };
+  hidden_models?: string[];
 }
 
 export interface ModelSetupRequest {

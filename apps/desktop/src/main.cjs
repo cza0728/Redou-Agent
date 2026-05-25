@@ -622,6 +622,12 @@ ipcMain.handle("redou:model-setup-refresh", (_event, body) =>
   getLocalService().refreshModelSetupModels(body),
 );
 ipcMain.handle("redou:model-setup", (_event, body) => getLocalService().setupMainModel(body));
+ipcMain.handle("redou:model-delete-key", (_event, provider, apiKeyEnv) =>
+  getLocalService().deleteModelApiKey(provider, apiKeyEnv),
+);
+ipcMain.handle("redou:model-hide-benchmark", (_event, modelKey) =>
+  getLocalService().hideBenchmarkModel(modelKey),
+);
 ipcMain.handle("redou:analytics:models", (_event, days) =>
   getLocalService().getModelsAnalytics(days),
 );
@@ -695,6 +701,9 @@ ipcMain.handle("redou:analysis:log-chat", (_event, body) =>
 );
 ipcMain.handle("redou:analysis:log-chat-clear", (_event, sessionKey) =>
   getLocalService().clearAnalysisLogChat(sessionKey),
+);
+ipcMain.handle("redou:analysis:log-chat-history", (_event, sessionKey) =>
+  getLocalService().getAnalysisLogChatHistory(sessionKey),
 );
 
 function readJsonFile(filePath) {

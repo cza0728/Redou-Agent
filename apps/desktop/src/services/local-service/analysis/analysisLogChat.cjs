@@ -1,36 +1,76 @@
 /**
  * analysisLogChat.cjs — AI-powered analysis log chat.
  *
- * Maintains per-session conversation history and calls the configured
- * model to answer questions about benchmark logs.
+ * Memory strategy: **Progressive LLM summarization + file persistence**.
+ *
+ * Instead of sending the full conversation each time (wastes tokens),
+ * we keep a compact rolling summary of older exchanges and only send:
+ *   [system prompt, conversation summary, last RECENT_WINDOW messages]
+ *
+ * After every COMPRESS_THRESHOLD new messages, the LLM is asked to
+ * compress older messages into the existing summary.  The session state
+ * (summary + recent messages) is persisted to a JSON file so it
+ * survives app restarts.
+ *
+ * Token usage per request ≈ system prompt + ~200 words summary + 4 messages.
  */
 const https = require("https");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
 
-// In-memory conversation store: sessionKey -> messages[]
-const conversations = new Map();
-const MAX_HISTORY = 40;
+// ── tuning constants ──
+const RECENT_WINDOW = 4;          // keep last N messages verbatim
+const COMPRESS_THRESHOLD = 6;     // compress when recent messages exceed this
+const SUMMARY_MAX_TOKENS = 512;   // max tokens for the summarization call
 
-function getConversation(sessionKey) {
-  if (!conversations.has(sessionKey)) {
-    conversations.set(sessionKey, []);
-  }
-  return conversations.get(sessionKey);
+// ── in-memory cache (avoids re-reading disk every call) ──
+const sessionCache = new Map();
+
+// ── persistence helpers ──
+
+function chatDir(analysisRoot) {
+  const dir = path.join(analysisRoot, "chat");
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
-function clearConversation(sessionKey) {
-  conversations.delete(sessionKey);
+function sessionFilePath(analysisRoot, sessionKey) {
+  const safe = String(sessionKey).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  return path.join(chatDir(analysisRoot), `${safe}.json`);
 }
 
-function listConversations() {
-  return [...conversations.keys()];
+function loadSession(analysisRoot, sessionKey) {
+  if (sessionCache.has(sessionKey)) return sessionCache.get(sessionKey);
+  const filePath = sessionFilePath(analysisRoot, sessionKey);
+  let session = { sessionKey, summary: "", recentMessages: [], totalRounds: 0 };
+  try {
+    if (fs.existsSync(filePath)) {
+      session = { ...session, ...JSON.parse(fs.readFileSync(filePath, "utf8")) };
+    }
+  } catch { /* corrupted file — start fresh */ }
+  sessionCache.set(sessionKey, session);
+  return session;
 }
 
-/**
- * Build a system prompt that includes the benchmark result summary.
- */
+function saveSession(analysisRoot, sessionKey, session) {
+  sessionCache.set(sessionKey, session);
+  try {
+    const filePath = sessionFilePath(analysisRoot, sessionKey);
+    fs.writeFileSync(filePath, JSON.stringify(session, null, 2), "utf8");
+  } catch { /* best effort */ }
+}
+
+function clearConversation(analysisRoot, sessionKey) {
+  sessionCache.delete(sessionKey);
+  try {
+    const filePath = sessionFilePath(analysisRoot, sessionKey);
+    if (fs.existsSync(filePath)) fs.rmSync(filePath, { force: true });
+  } catch { /* best effort */ }
+}
+
+// ── system prompt builder ──
+
 function buildSystemPrompt(logDetail, locale) {
   const lang = locale === "zh" ? "zh" : "en";
   const result = logDetail?.result;
@@ -76,25 +116,16 @@ function buildSystemPrompt(logDetail, locale) {
   ].filter((l) => l !== undefined).join("\n");
 }
 
-/**
- * Call an OpenAI-compatible chat completions API.
- */
-function chatCompletion({ baseUrl, apiKey, model, messages, timeout = 60000 }) {
+// ── LLM call ──
+
+function chatCompletion({ baseUrl, apiKey, model, messages, maxTokens = 2048, temperature = 0.3, timeout = 60000 }) {
   return new Promise((resolve, reject) => {
     const url = new URL(baseUrl.replace(/\/+$/, "") + "/chat/completions");
-    const body = JSON.stringify({
-      model,
-      messages,
-      max_tokens: 2048,
-      temperature: 0.3,
-    });
+    const body = JSON.stringify({ model, messages, max_tokens: maxTokens, temperature });
     const transport = url.protocol === "https:" ? https : http;
     const req = transport.request(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       timeout,
     }, (res) => {
       let data = "";
@@ -102,15 +133,9 @@ function chatCompletion({ baseUrl, apiKey, model, messages, timeout = 60000 }) {
       res.on("end", () => {
         try {
           const json = JSON.parse(data);
-          if (json.error) {
-            reject(new Error(json.error.message || JSON.stringify(json.error)));
-            return;
-          }
-          const content = json.choices?.[0]?.message?.content || "";
-          resolve(content);
-        } catch (err) {
-          reject(new Error(`Invalid API response: ${data.slice(0, 500)}`));
-        }
+          if (json.error) { reject(new Error(json.error.message || JSON.stringify(json.error))); return; }
+          resolve(json.choices?.[0]?.message?.content || "");
+        } catch { reject(new Error(`Invalid API response: ${data.slice(0, 500)}`)); }
       });
     });
     req.on("error", reject);
@@ -120,12 +145,55 @@ function chatCompletion({ baseUrl, apiKey, model, messages, timeout = 60000 }) {
   });
 }
 
-/**
- * Resolve which model+key+url to use for the log chat.
- * Uses the same provider catalog logic as codex_adapter.
- */
+// ── progressive summarization ──
+
+async function compressHistory(resolved, session, locale) {
+  // Take everything except the last RECENT_WINDOW messages and compress
+  const toCompress = session.recentMessages.slice(0, -RECENT_WINDOW);
+  const toKeep = session.recentMessages.slice(-RECENT_WINDOW);
+  if (toCompress.length === 0) return;
+
+  const oldPairs = toCompress.map((m) => `[${m.role}]: ${m.content}`).join("\n");
+  const existing = session.summary ? `之前的摘要:\n${session.summary}\n\n` : "";
+
+  const compressPrompt = locale === "zh"
+    ? [
+        "请将以下对话历史压缩成一段简洁的摘要（200字以内）。",
+        "保留关键问题、结论、用户关注点。去掉寒暄和重复内容。只输出摘要，不要加任何前缀。",
+        "",
+        existing,
+        "新的对话内容:",
+        oldPairs,
+      ].join("\n")
+    : [
+        "Compress the conversation below into a concise summary (under 200 words).",
+        "Keep key questions, conclusions, and user concerns. Output only the summary.",
+        "",
+        existing,
+        "New conversation:",
+        oldPairs,
+      ].join("\n");
+
+  try {
+    const newSummary = await chatCompletion({
+      baseUrl: resolved.url,
+      apiKey: resolved.key,
+      model: resolved.model,
+      messages: [{ role: "user", content: compressPrompt }],
+      maxTokens: SUMMARY_MAX_TOKENS,
+      temperature: 0.1,
+    });
+    session.summary = newSummary.trim();
+    session.recentMessages = toKeep;
+  } catch {
+    // If summarization fails, just hard-trim to keep things bounded
+    session.recentMessages = toKeep;
+  }
+}
+
+// ── model resolution ──
+
 function resolveChatModel(hermesHome) {
-  // Try to read .env from hermesHome
   const envVars = {};
   try {
     const envPath = path.join(hermesHome, ".env");
@@ -139,7 +207,6 @@ function resolveChatModel(hermesHome) {
 
   const env = (key) => process.env[key] || envVars[key] || "";
 
-  // Priority order of providers to try
   const providers = [
     { model: "deepseek-chat", key: env("DEEPSEEK_API_KEY"), url: env("DEEPSEEK_BASE_URL") || "https://api.deepseek.com/v1" },
     { model: "mimo-v2.5-pro", key: env("XIAOMI_API_KEY"), url: env("XIAOMI_BASE_URL") || "https://api.xiaomimimo.com/v1" },
@@ -155,10 +222,9 @@ function resolveChatModel(hermesHome) {
   return null;
 }
 
-/**
- * Main chat function called by the service layer.
- */
-async function chatWithAnalysisLog({ sessionKey, userMessage, logDetail, locale, hermesHome }) {
+// ── main entry point ──
+
+async function chatWithAnalysisLog({ sessionKey, userMessage, logDetail, locale, hermesHome, analysisRoot }) {
   const resolved = resolveChatModel(hermesHome);
   if (!resolved) {
     throw new Error(
@@ -168,22 +234,32 @@ async function chatWithAnalysisLog({ sessionKey, userMessage, logDetail, locale,
     );
   }
 
-  const history = getConversation(sessionKey);
-  const systemPrompt = buildSystemPrompt(logDetail, locale);
+  const root = analysisRoot || path.join(hermesHome, "..", "analysis");
+  const session = loadSession(root, sessionKey);
 
-  // Add user message
-  history.push({ role: "user", content: userMessage });
+  // 1. Append user message
+  session.recentMessages.push({ role: "user", content: userMessage });
+  session.totalRounds++;
 
-  // Trim history if too long
-  while (history.length > MAX_HISTORY) {
-    history.shift();
+  // 2. Compress if recent messages exceed threshold
+  if (session.recentMessages.length > COMPRESS_THRESHOLD) {
+    await compressHistory(resolved, session, locale);
   }
 
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...history,
-  ];
+  // 3. Build messages array: system + summary context + recent
+  const systemPrompt = buildSystemPrompt(logDetail, locale);
+  const messages = [{ role: "system", content: systemPrompt }];
 
+  if (session.summary) {
+    messages.push({
+      role: "system",
+      content: (locale === "zh" ? "以下是之前对话的摘要:\n" : "Summary of prior conversation:\n") + session.summary,
+    });
+  }
+
+  messages.push(...session.recentMessages);
+
+  // 4. Call LLM
   const reply = await chatCompletion({
     baseUrl: resolved.url,
     apiKey: resolved.key,
@@ -191,13 +267,20 @@ async function chatWithAnalysisLog({ sessionKey, userMessage, logDetail, locale,
     messages,
   });
 
-  history.push({ role: "assistant", content: reply });
+  // 5. Append assistant reply and persist
+  session.recentMessages.push({ role: "assistant", content: reply });
+  saveSession(root, sessionKey, session);
+
   return { reply, model: resolved.model };
+}
+
+function getConversationHistory(analysisRoot, sessionKey) {
+  const session = loadSession(analysisRoot, sessionKey);
+  return { messages: session.recentMessages || [], summary: session.summary || "" };
 }
 
 module.exports = {
   chatWithAnalysisLog,
-  getConversation,
   clearConversation,
-  listConversations,
+  getConversationHistory,
 };

@@ -878,6 +878,17 @@ function startAdapter() {
     const userPrompt = payload.userContext || payload.userInput || "";
     const requestTimeout = (payload.requestTimeoutSeconds || 300) * 1000;
 
+    // Global timeout: ensure the adapter never hangs forever (default 30 min)
+    const maxDurationMs = (payload.maxDurationSeconds || 1800) * 1000;
+    setTimeout(() => {
+      if (!doneEmitted) {
+        const msg = `Direct agent timed out after ${Math.round(maxDurationMs / 60000)} minutes.`;
+        emit({ type: "error", message: msg });
+        emit({ type: "done", metadata: { ...turnTiming(), completed: false, failed: true, error: msg, timedOut: true } });
+        process.exit(1);
+      }
+    }, maxDurationMs).unref();
+
     emit({
       type: "raw_log",
       content: `Direct agent mode: provider=${provider}, model=${model}, base_url=${baseUrl}, api_key_set=${!!apiKey}`,

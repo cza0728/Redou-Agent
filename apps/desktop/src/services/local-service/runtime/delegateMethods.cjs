@@ -78,6 +78,14 @@ class RuntimeDelegateMethods {
     return this.runDashboardBridge("setup_main_model", body);
   }
 
+  deleteModelApiKey(provider, apiKeyEnv) {
+    return this.runDashboardBridge("delete_model_api_key", { provider, api_key_env: apiKeyEnv });
+  }
+
+  hideBenchmarkModel(modelKey) {
+    return this.runDashboardBridge("hide_benchmark_model", { model_key: modelKey });
+  }
+
   getLogs(params = {}) {
     return this.logService.getLogs(params);
   }

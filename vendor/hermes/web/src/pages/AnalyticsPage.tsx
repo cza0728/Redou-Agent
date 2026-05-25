@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BarChart3,
   Check,
@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Square,
   StopCircle,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { redouApi } from "@/lib/api";
@@ -292,19 +293,16 @@ function benchmarkEvaluationTimeMs(result: AnalysisBenchmarkResult): number {
   return Number.isFinite(timeMs) ? timeMs : 0;
 }
 
+
 function buildChoices(
   options: ModelOptionsResponse | null,
-  configuredProviders?: Set<string>,
+  catalog?: ModelSetupCatalogResponse | null,
 ): BenchmarkModelChoice[] {
   const choices = new Map<string, BenchmarkModelChoice>();
   const add = (provider: string, model: string, current = false) => {
     const cleanProvider = String(provider || "auto").trim();
     const cleanModel = String(model || "").trim();
     if (!cleanModel) return;
-    // Filter out providers without configured API keys
-    if (configuredProviders && configuredProviders.size > 0 && !configuredProviders.has(cleanProvider)) {
-      return;
-    }
     const key = modelKey(cleanProvider, cleanModel);
     const existing = choices.get(key);
     choices.set(key, {
@@ -315,18 +313,37 @@ function buildChoices(
     });
   };
 
-  if (options?.provider && options?.model) {
-    add(options.provider, options.model, true);
-  }
+  // Build choices from SetupCatalog — only providers with api_key configured
+  const configuredCatalogProviders = (catalog?.providers ?? []).filter(
+    (p) => p.api_key_set || p.api_key_optional,
+  );
 
-  for (const provider of options?.providers ?? []) {
-    const providerId = provider.slug || provider.name || "auto";
-    const models = provider.models ?? [];
-    for (const model of models) {
-      add(providerId, model, Boolean(provider.is_current && model === options?.model));
+  if (configuredCatalogProviders.length > 0) {
+    const currentProvider = catalog?.current?.provider || options?.provider || "";
+    const currentModel = catalog?.current?.model || options?.model || "";
+    for (const cp of configuredCatalogProviders) {
+      const models = cp.models ?? [];
+      for (const model of models) {
+        const isCurrent = cp.provider === currentProvider && model === currentModel;
+        add(cp.provider, model, isCurrent);
+      }
+      if (models.length === 0 && cp.default_model) {
+        add(cp.provider, cp.default_model, cp.provider === currentProvider);
+      }
     }
-    if (models.length === 0 && provider.is_current && options?.model) {
-      add(providerId, options.model, true);
+  } else {
+    if (options?.provider && options?.model) {
+      add(options.provider, options.model, true);
+    }
+    for (const provider of options?.providers ?? []) {
+      const providerId = provider.slug || provider.name || "auto";
+      const models = provider.models ?? [];
+      for (const model of models) {
+        add(providerId, model, Boolean(provider.is_current && model === options?.model));
+      }
+      if (models.length === 0 && provider.is_current && options?.model) {
+        add(providerId, options.model, true);
+      }
     }
   }
 
@@ -708,9 +725,12 @@ function ModelResultCard({
               </div>
             )}
             <div className="border border-border/50 bg-background/15 px-4">
-              {result.tasks.map((task) => (
-                <TaskRow key={task.id} task={task} nowMs={nowMs} />
-              ))}
+              {result.tasks.map((task) => {
+                const effectiveTask = (result.status === "interrupted" || result.status === "failed") && isLiveStatus(task.status)
+                  ? { ...task, status: result.status as typeof task.status }
+                  : task;
+                return <TaskRow key={task.id} task={effectiveTask} nowMs={nowMs} />;
+              })}
             </div>
           </div>
         </div>
@@ -733,16 +753,9 @@ export default function AnalyticsPage() {
   const [stopping, setStopping] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-
-  const configuredProviders = useMemo(() => {
-    const set = new Set<string>();
-    for (const provider of setupCatalog?.providers ?? []) {
-      if (provider.api_key_set || provider.api_key_optional) {
-        set.add(provider.provider);
-      }
-    }
-    return set;
-  }, [setupCatalog]);
+  const [hiddenModels, setHiddenModels] = useState<Set<string>>(new Set());
+  const hiddenRef = useRef(hiddenModels);
+  hiddenRef.current = hiddenModels;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -756,11 +769,10 @@ export default function AnalyticsPage() {
       setBenchmarks(nextBenchmarks);
       setModelOptions(nextModels);
       setSetupCatalog(nextCatalog);
-      const configured = new Set<string>();
-      for (const p of nextCatalog?.providers ?? []) {
-        if (p.api_key_set || p.api_key_optional) configured.add(p.provider);
-      }
-      const choices = buildChoices(nextModels, configured);
+      // Sync hidden models from backend
+      const backendHidden = new Set(nextCatalog?.hidden_models ?? []);
+      setHiddenModels(backendHidden);
+      const choices = buildChoices(nextModels, nextCatalog);
       setSelected((current) => {
         if (current.size > 0) return current;
         const first = choices.find((choice) => choice.current) ?? choices[0];
@@ -819,7 +831,11 @@ export default function AnalyticsPage() {
     return map;
   }, [modelOptions]);
 
-  const choices = useMemo(() => buildChoices(modelOptions, configuredProviders), [modelOptions, configuredProviders]);
+  const choices = useMemo(() => {
+    const all = buildChoices(modelOptions, setupCatalog);
+    if (hiddenModels.size === 0) return all;
+    return all.filter((c) => !hiddenModels.has(c.key));
+  }, [modelOptions, setupCatalog, hiddenModels]);
   const filteredChoices = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return choices;
@@ -867,6 +883,14 @@ export default function AnalyticsPage() {
       setStarting(false);
     }
   }, [load, selectedModels, starting]);
+
+  const deleteModel = useCallback(async (choice: BenchmarkModelChoice) => {
+    setHiddenModels((prev) => { const next = new Set(prev); next.add(choice.key); return next; });
+    setSelected((current) => { const next = new Set(current); next.delete(choice.key); return next; });
+    try {
+      await redouApi.hideBenchmarkModel(choice.key);
+    } catch { /* best effort */ }
+  }, []);
 
   const stopBenchmark = useCallback(async (key: string) => {
     if (stopping) return;
@@ -999,6 +1023,16 @@ export default function AnalyticsPage() {
                       <span className="mt-1 block truncate text-xs text-muted-foreground">
                         {providerLabel(provider, choice.provider)} · {choice.provider}
                       </span>
+                    </span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title={locale === "zh" ? "删除此模型配置" : "Remove this model"}
+                      className="mt-0.5 shrink-0 p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
+                      onClick={(e) => { e.stopPropagation(); void deleteModel(choice); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); void deleteModel(choice); } }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
                     </span>
                   </button>
                 );
